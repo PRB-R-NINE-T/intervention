@@ -1,0 +1,154 @@
+.App {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 2rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.app-header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  text-align: center;
+  margin: 0;
+  letter-spacing: -0.5px;
+}
+
+.app-main {
+  flex: 1;
+  padding: 2rem 0;
+  width: 100%;
+}
+
+.stream-section {
+  flex: 4;
+  min-width: 0;
+}
+
+.stream-input-group {
+  margin-bottom: 1.5rem;
+  padding: 0 2rem;
+}
+
+.stream-input-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #e0e0e0;
+  font-size: 0.95rem;
+}
+
+.stream-input-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.stream-input {
+  flex: 1;
+  padding: 0.875rem 1rem;
+  font-size: 1rem;
+  border: 2px solid #2a2a2a;
+  border-radius: 8px;
+  background: #1a1a1a;
+  color: #ffffff;
+  transition: all 0.3s ease;
+  outline: none;
+}
+
+.stream-input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.stream-input::placeholder {
+  color: #666;
+}
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+  background: #2a2a2a;
+  color: #e0e0e0;
+  border: 1px solid #404040;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #333;
+  border-color: #555;
+}
+
+.btn-start-stream {
+  white-space: nowrap;
+  padding: 0.875rem 1.75rem;
+  flex-shrink: 0;
+}
+
+.main-content {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  padding: 0 2rem;
+}
+
+@media (max-width: 1024px) {
+  .main-content {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    padding: 1.5rem;
+  }
+
+  .app-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+  
+  .main-content {
+    gap: 1rem;
+  }
+
+  .stream-input-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .stream-input,
+  .btn-start-stream {
+    width: 100%;
+  }
+}
+
