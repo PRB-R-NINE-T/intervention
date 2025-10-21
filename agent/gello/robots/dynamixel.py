@@ -104,6 +104,7 @@ class DynamixelRobot(Robot):
         return len(self._joint_ids)
 
     def get_joint_state(self) -> np.ndarray:
+        print("got joint state: ", self._driver.get_joints())
         pos = (self._driver.get_joints() - self._joint_offsets) * self._joint_signs
         assert len(pos) == self.num_dofs()
 
@@ -125,6 +126,8 @@ class DynamixelRobot(Robot):
         return pos
 
     def command_joint_state(self, joint_state: np.ndarray) -> None:
+        print("commanding joint state: ", (joint_state + self._joint_offsets).tolist())
+        print((joint_state + self._joint_offsets).tolist())
         self._driver.set_joints((joint_state + self._joint_offsets).tolist())
 
     def set_torque_mode(self, mode: bool):
@@ -135,3 +138,6 @@ class DynamixelRobot(Robot):
 
     def get_observations(self) -> Dict[str, np.ndarray]:
         return {"joint_state": self.get_joint_state()}
+
+    def close(self):
+        self._driver.close()

@@ -1,3 +1,4 @@
+import time
 from typing import Any, Dict, Protocol
 
 import numpy as np
@@ -25,6 +26,19 @@ class Agent(Protocol):
             bool: True if successful, False if not.
         """
 
+    def set_torque_mode(self, mode: bool):
+        """Set the torque mode of the robot.
+
+        Args:
+            mode: True if torque mode, False if position mode.
+        """
+        raise NotImplementedError
+
+    def close(self):
+        """Close the agent.
+        """
+        raise NotImplementedError
+
 
 class DummyAgent(Agent):
     def __init__(self, num_dofs: int):
@@ -49,10 +63,22 @@ class BimanualAgent(Agent):
             left_obs[key] = val[:half_dim]
             right_obs[key] = val[half_dim:]
         return np.concatenate(
-            [self.agent_left.act(left_obs), self.agent_right.act(right_obs)]
+            [[0] * 7, self.agent_right.act(right_obs)]
         )
 
     def move_to_position(self, position: np.ndarray) -> bool:
-        self.agent_left.move_to_position(position[:self.agent_left.num_dofs()])
-        self.agent_right.move_to_position(position[self.agent_left.num_dofs():])
+        time.sleep(0.05)
+        self.agent_right.move_to_position(np.array(position[7:]))
+
+        time.sleep(0.05)
+        self.agent_left.move_to_position(np.array(position[:7]))
+        
         return True
+
+    def set_torque_mode(self, mode: bool):
+        self.agent_left.set_torque_mode(mode)
+        self.agent_right.set_torque_mode(mode)
+
+    def close(self):
+        self.agent_left.close()
+        self.agent_right.close()

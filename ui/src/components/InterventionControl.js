@@ -1,13 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import './InterventionControl.css';
 
-function InterventionControl({ isActive, onStart, onStop, streamAddress }) {
+function InterventionControl({ isActive, onStart, onStop, streamAddress, robotAddress, onRobotAddressChange }) {
   const [countdown, setCountdown] = useState(null);
   const [showMessage, setShowMessage] = useState(false);
   const [error, setError] = useState(null);
+  const [isLaunching, setIsLaunching] = useState(false);
+  const [isLaunched, setIsLaunched] = useState(false);
 
-  // API base is proxied by CRA dev server (3000 -> 8080), use relative paths
-  const apiFetch = (path, init) => fetch(path, init);
+  // Build absolute URL to robot if provided; otherwise fall back to relative path (proxy)
+  const apiFetch = (path, init) => {
+    try {
+      if (robotAddress && robotAddress.trim().length > 0) {
+        const normalized = (() => {
+          try {
+            return new URL(robotAddress);
+          } catch {
+            return new URL(`http://${robotAddress}`);
+          }
+        })();
+        const base = `${normalized.protocol}//${normalized.host}`; // ignore path
+        const url = new URL(path, base).toString();
+        return fetch(url, init);
+      }
+    } catch (_) {
+      // fall through to relative fetch
+    }
+    return fetch(path, init);
+  };
 
   const parseResponse = async (response) => {
     const contentType = response.headers.get('content-type') || '';
@@ -52,6 +72,23 @@ function InterventionControl({ isActive, onStart, onStop, streamAddress }) {
     setCountdown(5);
     
     try {
+      // Ensure robots are launched before starting intervention
+      const prelaunchResponse = await apiFetch(`/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      }).catch(() => null);
+      if (prelaunchResponse) {
+        try {
+          const preData = await parseResponse(prelaunchResponse);
+          if (preData?.status === 'launched' || preData?.status === 'already_launched') {
+            setIsLaunched(true);
+          }
+        } catch (_) {
+          // Ignore parse errors here; starting intervention is the primary action
+        }
+      }
+
       const response = await apiFetch(`/intervene`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -67,6 +104,26 @@ function InterventionControl({ isActive, onStart, onStop, streamAddress }) {
     } catch (err) {
       setError(`Error: ${err.message}`);
       setCountdown(null);
+    }
+  };
+
+  const handleLaunchClick = async () => {
+    setError(null);
+    setIsLaunching(true);
+    try {
+      const response = await apiFetch(`/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      const data = await parseResponse(response);
+      if (data?.status === 'launched' || data?.status === 'already_launched') {
+        setIsLaunched(true);
+      }
+    } catch (err) {
+      setError(`Error launching robots: ${err.message}`);
+    } finally {
+      setIsLaunching(false);
     }
   };
 
@@ -96,6 +153,28 @@ function InterventionControl({ isActive, onStart, onStop, streamAddress }) {
     <div className="intervention-control">
       <div className="control-card">
         <h2>Intervention Control</h2>
+
+        <div className="robot-input-group" style={{ marginBottom: '12px' }}>
+          <label htmlFor="robot-address">Robot Address:</label>
+          <input
+            id="robot-address"
+            type="text"
+            placeholder="e.g. 192.168.1.42:5001 or http://robot.local:5001"
+            value={robotAddress}
+            onChange={(e) => onRobotAddressChange?.(e.target.value)}
+            className="robot-input"
+          />
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <button 
+            className="btn btn-primary"
+            onClick={handleLaunchClick}
+            disabled={isLaunching || isLaunched}
+          >
+            {isLaunching ? 'Launching…' : (isLaunched ? 'Launched' : 'Launch')}
+          </button>
+        </div>
         
         {error && (
           <div className="error-message" style={{

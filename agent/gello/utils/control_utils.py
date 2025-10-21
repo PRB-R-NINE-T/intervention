@@ -166,6 +166,9 @@ def run_control_loop(
     start_time = time.time()
     obs = env.get_obs()
 
+    agent.move_to_position(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    time.sleep(1)
+
     while True:
         if print_timing:
             num = time.time() - start_time

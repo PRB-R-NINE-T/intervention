@@ -7,6 +7,7 @@ from queue import Queue, Empty
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+import numpy as np
 
 import tyro
 import zmq.error
@@ -46,6 +47,10 @@ def cleanup():
         return
     cleanup_in_progress = True
 
+    # agent.agent_left.close()
+    print("closing agent_right")
+    agent.agent_right.close()
+
     logger.info("Cleaning up resources...")
     for server in active_servers:
         try:
@@ -63,11 +68,62 @@ def cleanup():
     logger.info("Cleanup completed.")
 
 
+if launched:
+    logger.info("launch_robots() called but robots already launched; skipping")
+
+# Register cleanup handlers
+# If terminated without cleanup, can leave ZMQ sockets bound causing "address in use" errors or resource leaks
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    logger.warning("Received signal %s; performing cleanup and exiting", signum)
+    cleanup()
+    import os
+
+    os._exit(0)
+
+atexit.register(cleanup)
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+left_config_path = "/home/p/Desktop/intervention/agent/configs/yam_active.yaml"
+right_config_path = "/home/p/Desktop/intervention/agent/configs/yam_active_l.yaml"
+logger.info("Launching robots with configs: left=%s right=%s", left_config_path, right_config_path)
+# atexit.register(cleanup)
+# signal.signal(signal.SIGINT, signal_handler)
+# signal.signal(signal.SIGTERM, signal_handler)
+
+# Note: avoid CLI parsing when called from server context
+bimanual = right_config_path is not None
+logger.info("Bimanual mode: %s", bimanual)
+
+# Load configs
+logger.info("Loading left config from %s", left_config_path)
+left_cfg = OmegaConf.to_container(OmegaConf.load(left_config_path), resolve=True)
+if bimanual:
+    logger.info("Loading right config from %s", right_config_path)
+    right_cfg = OmegaConf.to_container(OmegaConf.load(right_config_path), resolve=True)
+
+# Create agent
+if bimanual:
+    from gello.agents.agent import BimanualAgent
+
+    logger.info("Instantiating BimanualAgent")
+    agent = BimanualAgent(
+        agent_left=None,
+        agent_right=instantiate_from_dict(right_cfg["agent"]),
+    )
+else:
+    logger.info("Instantiating single agent from left config")
+    agent = instantiate_from_dict(left_cfg["agent"])
+
+launched = True
+logger.info("Robots launched")
+
 def wait_for_server_ready(port, host="127.0.0.1", timeout_seconds=5):
     """Wait for ZMQ server to be ready with retry logic."""
     from gello.zmq_core.robot_node import ZMQClientRobot
 
-    attempts = int(timeout_seconds * 10)  a# 0.1s intervals
+    attempts = int(timeout_seconds * 10)  # 0.1s intervals
     logger.info("Waiting for server %s:%s (timeout=%ss, attempts=%s)", host, port, timeout_seconds, attempts)
     for attempt in range(attempts):
         try:
@@ -112,48 +168,8 @@ def signal_handler(signum, frame):
     os._exit(0)
 
 
-def launch_robots():
-    global agent
-    global launched
-    global curr_tracking_robot_webrtc
-    # Register cleanup handlers
-    # If terminated without cleanup, can leave ZMQ sockets bound causing "address in use" errors or resource leaks
-
-    left_config_path = "/Users/safe-sentinel-inc/Desktop/intervention/agent/configs/gello_left.yaml"
-    right_config_path = "/Users/safe-sentinel-inc/Desktop/intervention/agent/configs/gello_right.yaml"
-    logger.info("Launching robots with configs: left=%s right=%s", left_config_path, right_config_path)
-    atexit.register(cleanup)
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    args = tyro.cli(Args)
-    logger.debug("CLI args parsed: %s", args)
-
-    bimanual = right_config_path is not None
-    logger.info("Bimanual mode: %s", bimanual)
-
-    # Load configs
-    logger.info("Loading left config from %s", left_config_path)
-    left_cfg = OmegaConf.to_container(OmegaConf.load(left_config_path), resolve=True)
-    if bimanual:
-        logger.info("Loading right config from %s", right_config_path)
-        right_cfg = OmegaConf.to_container(OmegaConf.load(right_config_path), resolve=True)
-
-    # Create agent
-    if bimanual:
-        from gello.agents.agent import BimanualAgent
-
-        logger.info("Instantiating BimanualAgent")
-        agent = BimanualAgent(
-            agent_left=instantiate_from_dict(left_cfg["agent"]),
-            agent_right=instantiate_from_dict(right_cfg["agent"]),
-        )
-    else:
-        logger.info("Instantiating single agent from left config")
-        agent = instantiate_from_dict(left_cfg["agent"])
-
-    launched = True
-    logger.info("Robots launched")
+# def launch_robots():
+    
 
 def _intervention_loop() -> None:
     """Runs in a background thread; executes intervention and queued tasks."""
@@ -166,16 +182,20 @@ def _intervention_loop() -> None:
     try:
         # Move to safe starting position with torque enabled
         logger.info("[intervention] Moving robots to starting position...")
-        agent.agent_left.set_torque_mode(True)
         agent.agent_right.set_torque_mode(True)
+        time.sleep(1)
         logger.debug("[intervention] Torque enabled on both agents")
-        agent.move_to_position([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        arr = -1 * np.array([7.79108842, 7.85551561, 3.11858294, 1.22565065, 4.58353459, 1.58613613, 2.95291302, 4.81056375, 4.72466083, 3.12471886, 5.85673865, 1.53091283, -1, 0])
+        print(arr)
+        # agent.agent_left.move_to_position(arr[:7])
+        agent.agent_right.move_to_position(arr[7:])
+        time.sleep(0.3)
         logger.debug("[intervention] Move to starting position issued")
-        time.sleep(5)
+        # time.sleep(5)
 
         # Enable gravity compensation - user can now move robots freely
         logger.info("[intervention] Enabling gravity compensation mode...")
-        agent.agent_left.set_torque_mode(False)
+        # agent.agent_left.set_torque_mode(False)
         agent.agent_right.set_torque_mode(False)
         logger.debug("[intervention] Torque disabled; gravity compensation active")
 
@@ -183,31 +203,13 @@ def _intervention_loop() -> None:
         logger.info("[intervention] Active - robots in gravity compensation mode")
 
         # Main intervention loop: execute queued tasks and lightweight monitoring
-        while not intervention_stop_event.is_set():
-            try:
-                # Task format: (callable, args, kwargs)
-                task, args, kwargs = intervention_tasks.get(timeout=0.01)
-                try:
-                    task_name = getattr(task, "__name__", repr(task))
-                except Exception:
-                    task_name = repr(task)
-                logger.info("[intervention] Executing task: %s", task_name)
-            except Empty:
-                # Idle work while waiting for tasks (non-blocking)
-                try:
-                    _ = agent.get_joint_state()
-                except Exception as e:
-                    logger.exception("[intervention] Monitor error: %s", e)
-                time.sleep(0.01)
-                continue
-
-            try:
-                task(agent, *args, **kwargs)
-                logger.info("[intervention] Task completed")
-            except Exception as e:
-                logger.exception("[intervention] Task error: %s", e)
-            finally:
-                intervention_tasks.task_done()
+        counter = 0
+        while currently_intervening:
+            joint_states = agent.act({})
+            counter += 1
+            if counter % 100 == 0:
+                print("currently intervening with joint states: ", joint_states)
+            time.sleep(0.01)
 
     except Exception as e:
         logger.exception("[intervention] Fatal error: %s", e)
@@ -231,10 +233,13 @@ def start_intervention() -> bool:
             return False
         intervention_stop_event.clear()
         logger.info("Starting intervention thread")
+
         intervention_thread = threading.Thread(target=_intervention_loop, name="intervention-thread", daemon=True)
         intervention_thread.start()
         active_threads.append(intervention_thread)
         logger.info("Intervention thread started: %s", intervention_thread.name)
+
+        logger.info("Intervention thread started")
         return True
 
 
@@ -302,9 +307,12 @@ def api_intervene_status():
 def api_intervene_start():
     if not launched:
         return jsonify({"status": "not_launched", "message": "Robots not launched"}), 400
-    started = bool(start_intervention())
-    if started:
-        return jsonify({"status": "started", "message": "Intervention mode active"})
+    
+    if is_intervention_active():
+        return jsonify({"status": "already_active"}), 200
+
+    intervene()
+    # Race: became active between checks
     return jsonify({"status": "already_active"}), 200
 
 
@@ -316,6 +324,22 @@ def api_intervene_stop():
     return jsonify({"status": "stopped", "message": "Intervention mode ended"})
 
 
+@app.post("/launch")
+def api_launch():
+    """Launch robots if not already launched."""
+    global launched
+    if launched:
+        return jsonify({"status": "already_launched"}), 200
+
+    try:
+        # Run launch synchronously on the main thread
+        # launch_robots()
+        return jsonify({"status": "launched"}), 200
+    except Exception as e:
+        logger.exception("Launch failed: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    app.run(host="0.0.0.0", port=5001, debug=False)
+    # Run single-threaded so request handlers execute on the main thread
+    app.run(host="0.0.0.0", port=5001, debug=False, threaded=False)

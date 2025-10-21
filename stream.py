@@ -17,7 +17,6 @@ import numpy as np
 import time
 from concurrent.futures import ThreadPoolExecutor
 from aiohttp import web
-from aiohttp_cors import setup as cors_setup, ResourceOptions
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.contrib.media import MediaRelay
 from av import VideoFrame
@@ -42,7 +41,7 @@ class CameraVideoTrack(VideoStreamTrack):
     A video track that captures frames from OpenCV camera source
     """
     
-    def __init__(self, camera_index=0):
+    def __init__(self, camera_index=8):
         super().__init__()
         self.camera_index = camera_index
         self.cap = None
@@ -51,7 +50,7 @@ class CameraVideoTrack(VideoStreamTrack):
     def _initialize_camera(self):
         """Initialize camera capture"""
         # Try different camera indices for iPhone
-        camera_options = [self.camera_index, 1, 2, 0]
+        camera_options = [self.camera_index, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         
         for idx in camera_options:
             logger.info(f"Trying to open camera index: {idx}")
@@ -435,18 +434,6 @@ async def main():
     app.router.add_post("/intervention/start", start_intervention)
     app.router.add_post("/intervention/stop", stop_intervention)
     app.router.add_get("/intervention/status", intervention_status)
-
-    # Setup CORS for routes (in addition to middleware) to satisfy various clients
-    cors = cors_setup(app, defaults={
-        "*": ResourceOptions(
-            allow_credentials=True,
-            expose_headers="*",
-            allow_headers="*",
-            allow_methods="*"
-        )
-    })
-    for route in list(app.router.routes()):
-        cors.add(route)
 
     port = 8080
     local_ip = get_local_ip()

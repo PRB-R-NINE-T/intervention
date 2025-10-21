@@ -5,6 +5,7 @@ import InterventionControl from './components/InterventionControl';
 
 function App() {
   const [streamAddress, setStreamAddress] = useState('');
+  const [robotAddress, setRobotAddress] = useState('');
   const [isInterventionActive, setIsInterventionActive] = useState(false);
   const [isStreamConnected, setIsStreamConnected] = useState(false);
   const [isStreamConnecting, setIsStreamConnecting] = useState(false);
@@ -49,13 +50,16 @@ function App() {
               }}
             />
           </div>
-          
-          <InterventionControl
-            isActive={isInterventionActive}
-            onStart={() => setIsInterventionActive(true)}
-            onStop={() => setIsInterventionActive(false)}
-            streamAddress={streamAddress}
-          />
+          <div className="side-panel">
+            <InterventionControl
+              isActive={isInterventionActive}
+              onStart={() => setIsInterventionActive(true)}
+              onStop={() => setIsInterventionActive(false)}
+              streamAddress={streamAddress}
+              robotAddress={robotAddress}
+              onRobotAddressChange={setRobotAddress}
+            />
+          </div>
         </div>
       </main>
     </div>

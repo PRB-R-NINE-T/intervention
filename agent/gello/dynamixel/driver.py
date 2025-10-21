@@ -119,6 +119,7 @@ class FakeDynamixelDriver(DynamixelDriverProtocol):
             )
         if not self._torque_enabled:
             raise RuntimeError("Torque must be enabled to set joint angles")
+        print("joint angles: ", joint_angles)
         self._joint_angles = np.array(joint_angles, dtype=float)
 
     def set_current(self, currents: Sequence[float]):
@@ -190,6 +191,7 @@ class DynamixelDriver(DynamixelDriverProtocol):
         self._stop_thread = Event()
 
         # Optional torque-current mapping
+        print("servo types", servo_types)
         self._servo_types = list(servo_types) if servo_types is not None else None
         if self._servo_types is not None:
             self.torque_to_current_map = np.array(
@@ -278,6 +280,7 @@ class DynamixelDriver(DynamixelDriverProtocol):
             raise RuntimeError(f"Failed to change the baudrate, {self._baudrate}")
 
         # Add parameters for each Dynamixel servo to the group sync read
+        print("ids ", self._ids)
         for dxl_id in self._ids:
             if not self._groupSyncRead.addParam(dxl_id):
                 raise RuntimeError(
@@ -311,34 +314,41 @@ class DynamixelDriver(DynamixelDriverProtocol):
             self._fake_joint_angles = np.array(joint_angles)
             return
 
-        for dxl_id, angle in zip(self._ids, joint_angles):
-            # Convert the angle to the appropriate value for the servo
-            position_value = int(angle * 2048 / np.pi)
+        with self._lock:
+            for dxl_id, angle in zip(self._ids, joint_angles):
+                # Convert the angle to the appropriate value for the servo
+                position_value = int(angle * 2048 / np.pi)
+                print("position value", position_value)
+                # Allocate goal position value into byte array
+                param_goal_position = [
+                    DXL_LOBYTE(DXL_LOWORD(position_value)),
+                    DXL_HIBYTE(DXL_LOWORD(position_value)),
+                    DXL_LOBYTE(DXL_HIWORD(position_value)),
+                    DXL_HIBYTE(DXL_HIWORD(position_value)),
+                ]
 
-            # Allocate goal position value into byte array
-            param_goal_position = [
-                DXL_LOBYTE(DXL_LOWORD(position_value)),
-                DXL_HIBYTE(DXL_LOWORD(position_value)),
-                DXL_LOBYTE(DXL_HIWORD(position_value)),
-                DXL_HIBYTE(DXL_HIWORD(position_value)),
-            ]
-
-            # Add goal position value to the Syncwrite parameter storage
-            dxl_addparam_result = self._groupSyncWrite.addParam(
-                dxl_id, param_goal_position
-            )
-            if not dxl_addparam_result:
-                raise RuntimeError(
-                    f"Failed to set joint angle for Dynamixel with ID {dxl_id}"
+                # Add goal position value to the Syncwrite parameter storage
+                dxl_addparam_result = self._groupSyncWrite.addParam(
+                    dxl_id, param_goal_position
                 )
+                if not dxl_addparam_result:
+                    raise RuntimeError(
+                        f"Failed to set joint angle for Dynamixel with ID {dxl_id}"
+                    )
 
+        count = 0
         # Syncwrite goal position
-        dxl_comm_result = self._groupSyncWrite.txPacket()
-        if dxl_comm_result != COMM_SUCCESS:
-            raise RuntimeError("Failed to syncwrite goal position")
-
+        for i in range(3):
+            dxl_comm_result = self._groupSyncWrite.txPacket()
+            if dxl_comm_result != COMM_SUCCESS:
+                count += 1
+            if count >= 2:
+                print("Failed to syncwrite goal position", dxl_comm_result, count)
+                raise RuntimeError("Failed to syncwrite goal position", dxl_comm_result)
         # Clear syncwrite parameter storage
         self._groupSyncWrite.clearParam()
+
+        return
 
     def set_current(self, currents: Sequence[float]):
         if self._is_fake:

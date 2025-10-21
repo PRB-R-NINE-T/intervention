@@ -1,4 +1,5 @@
 import os
+import threading
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, Tuple
 
@@ -40,6 +41,7 @@ class DynamixelRobotConfig:
             port=port,
             gripper_config=self.gripper_config,
             start_joints=start_joints,
+            baudrate=57600,
         )
 
 
@@ -108,6 +110,8 @@ PORT_CONFIG_MAP: Dict[str, DynamixelRobotConfig] = {
 }
 
 
+
+
 class GelloAgent(Agent):
     def __init__(
         self,
@@ -118,6 +122,8 @@ class GelloAgent(Agent):
         # Ensure start_joints is a numpy array if provided
         if start_joints is not None and not isinstance(start_joints, np.ndarray):
             start_joints = np.array(start_joints)
+        # Control mutex to prevent concurrent act and move_to_position
+        self._control_lock = threading.Lock()
         if dynamixel_config is not None:
             self._robot = dynamixel_config.make_robot(
                 port=port, start_joints=start_joints
@@ -130,8 +136,18 @@ class GelloAgent(Agent):
             self._robot = config.make_robot(port=port, start_joints=start_joints)
 
     def act(self, obs: Dict[str, np.ndarray]) -> np.ndarray:
-        return self._robot.get_joint_state()
+        with self._control_lock:
+            return self._robot.get_joint_state()
 
     def move_to_position(self, position: np.ndarray) -> bool:
-        self._robot.command_joint_state(position)
-        return True
+        with self._control_lock:
+            self._robot.command_joint_state(position)
+            return True
+
+    def set_torque_mode(self, mode: bool):
+        with self._control_lock:
+            self._robot.set_torque_mode(mode)
+
+    def close(self):
+        with self._control_lock:
+            self._robot.close()

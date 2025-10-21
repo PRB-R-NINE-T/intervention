@@ -19,3 +19,4 @@ xarm
 xarm-python-sdk
 numpy-quaternion
 termcolor
+flask_cors==5.0.0

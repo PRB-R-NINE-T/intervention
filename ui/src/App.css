@@ -25,7 +25,7 @@
 }
 
 .stream-section {
-  flex: 4;
+  flex: 7;
   min-width: 0;
 }
 
@@ -117,6 +117,14 @@
   align-items: flex-start;
   padding: 0 2rem;
 }
+
+.side-panel {
+  flex: 3;
+  min-width: 260px;
+  max-width: 440px;
+}
+
+/* robot input moved inside control card; styles live with component */
 
 @media (max-width: 1024px) {
   .main-content {

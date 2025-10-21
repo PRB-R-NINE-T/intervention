@@ -80,14 +80,6 @@ def main():
     print("=" * 60)
 
     port = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTA2U4GA-if00-port0"
-    servo_types = [
-        "XC330_T288_T",
-        "XM430_W210_T",
-        "XM430_W210_T",
-        "XC330_T288_T",
-        "XC330_T288_T",
-        "XC330_T288_T",
-    ]
     joint_signs = [1.0, -1.0, -1.0, 1.0, 1.0, 1.0]
     urdf_path = str(
         Path(__file__).parent / "urdf" / "yam_active_gello" / "robot.urdf"
@@ -95,7 +87,6 @@ def main():
 
     print(f"Configuration:")
     print(f"  Port: {port}")
-    print(f"  Servo types: {servo_types}")
     print(f"  Joint signs: {joint_signs}")
     print(f"  URDF path: {urdf_path}")
     print(f"  DOF: 6")
@@ -112,7 +103,6 @@ def main():
         temp_driver = DynamixelDriver(
             ids=list(range(1, 7)),  # [1, 2, 3, 4, 5, 6]
             port=port,
-            servo_types=servo_types,
         )
         print("✓ Temporary driver created successfully")
 
