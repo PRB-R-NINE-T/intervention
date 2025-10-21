@@ -1,33 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import './InterventionControl.css';
 
-function InterventionControl({ isActive, onStart, onStop, streamAddress, robotAddress, onRobotAddressChange }) {
+function InterventionControl({ isActive, onStart, onStop, streamAddress }) {
   const [countdown, setCountdown] = useState(null);
   const [showMessage, setShowMessage] = useState(false);
   const [error, setError] = useState(null);
   const [isLaunching, setIsLaunching] = useState(false);
   const [isLaunched, setIsLaunched] = useState(false);
 
-  // Build absolute URL to robot if provided; otherwise fall back to relative path (proxy)
-  const apiFetch = (path, init) => {
-    try {
-      if (robotAddress && robotAddress.trim().length > 0) {
-        const normalized = (() => {
-          try {
-            return new URL(robotAddress);
-          } catch {
-            return new URL(`http://${robotAddress}`);
-          }
-        })();
-        const base = `${normalized.protocol}//${normalized.host}`; // ignore path
-        const url = new URL(path, base).toString();
-        return fetch(url, init);
-      }
-    } catch (_) {
-      // fall through to relative fetch
-    }
-    return fetch(path, init);
-  };
+  // Use relative paths; rely on dev proxy or same-origin on prod
+  const apiFetch = (path, init) => fetch(path, init);
 
   const parseResponse = async (response) => {
     const contentType = response.headers.get('content-type') || '';
@@ -72,6 +54,16 @@ function InterventionControl({ isActive, onStart, onStop, streamAddress, robotAd
     setCountdown(5);
     
     try {
+      if (!streamAddress || String(streamAddress).trim().length === 0) {
+        setError('Please enter a WebRTC stream address before starting');
+        setCountdown(null);
+        return;
+      }
+
+      // Debug log to verify payload being sent
+      // eslint-disable-next-line no-console
+      console.debug('Starting intervention with streamAddress:', streamAddress);
+
       // Ensure robots are launched before starting intervention
       const prelaunchResponse = await apiFetch(`/launch`, {
         method: 'POST',
@@ -92,7 +84,7 @@ function InterventionControl({ isActive, onStart, onStop, streamAddress, robotAd
       const response = await apiFetch(`/intervene`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}'
+        body: JSON.stringify({ streamAddress: String(streamAddress).trim() })
       });
       const data = await parseResponse(response);
       if (data.status === 'started' || data.status === 'already_active') {
@@ -154,17 +146,6 @@ function InterventionControl({ isActive, onStart, onStop, streamAddress, robotAd
       <div className="control-card">
         <h2>Intervention Control</h2>
 
-        <div className="robot-input-group" style={{ marginBottom: '12px' }}>
-          <label htmlFor="robot-address">Robot Address:</label>
-          <input
-            id="robot-address"
-            type="text"
-            placeholder="e.g. 192.168.1.42:5001 or http://robot.local:5001"
-            value={robotAddress}
-            onChange={(e) => onRobotAddressChange?.(e.target.value)}
-            className="robot-input"
-          />
-        </div>
 
         <div style={{ marginBottom: '12px' }}>
           <button 
@@ -193,6 +174,8 @@ function InterventionControl({ isActive, onStart, onStop, streamAddress, robotAd
           <button 
             className="btn btn-start"
             onClick={handleStartClick}
+            disabled={!streamAddress || String(streamAddress).trim().length === 0}
+            title={!streamAddress || String(streamAddress).trim().length === 0 ? 'Enter WebRTC stream address above' : undefined}
           >
             <svg 
               width="24" 

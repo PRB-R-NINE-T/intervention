@@ -11,30 +11,7 @@
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
   height: 100%;
 }
-.robot-input-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-  color: #e0e0e0;
-  font-size: 0.95rem;
-}
 
-.robot-input {
-  width: 100%;
-  padding: 0.875rem 1rem;
-  font-size: 1rem;
-  border: 2px solid #2a2a2a;
-  border-radius: 8px;
-  background: #1a1a1a;
-  color: #ffffff;
-  transition: all 0.3s ease;
-  outline: none;
-}
-
-.robot-input:focus {
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
 
 .control-card h2 {
   margin: 0 0 1.5rem 0;

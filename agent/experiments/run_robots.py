@@ -1,4 +1,6 @@
 import atexit
+import asyncio
+import json
 import logging
 import signal
 import threading
@@ -18,14 +20,42 @@ from gello.utils.launch_utils import instantiate_from_dict
 logger = logging.getLogger(__name__)
 
 # Embedded Flask API
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+from aiortc import RTCPeerConnection, RTCSessionDescription
 
 # Global variable to store agent instance
 agent = None
 launched = False
 curr_tracking_robot_webrtc = None
+# Full endpoint to send joint states to (constructed from streamAddress + "/intervene")
+webrtc_intervene_endpoint = None
 currently_intervening = False
+
+# WebRTC state (client-side)
+webrtc_pc = None
+webrtc_dc = None
+webrtc_connected = False
+webrtc_loop = None
+webrtc_loop_thread: threading.Thread | None = None
+
+
+def _webrtc_send_json(payload: dict) -> None:
+    """Thread-safe schedule of DataChannel send on the WebRTC asyncio loop."""
+    global webrtc_dc, webrtc_loop
+    if webrtc_loop is None or webrtc_dc is None:
+        return
+    message = json.dumps(payload)
+    def _do_send() -> None:
+        try:
+            if getattr(webrtc_dc, "readyState", "") == "open":
+                webrtc_dc.send(message)
+        except Exception:
+            logger.debug("[webrtc] send failed", exc_info=True)
+    try:
+        webrtc_loop.call_soon_threadsafe(_do_send)
+    except Exception:
+        logger.debug("[webrtc] failed to schedule send", exc_info=True)
 
 # Thread-based intervention system
 intervention_thread: threading.Thread | None = None
@@ -178,6 +208,8 @@ def _intervention_loop() -> None:
     if not launched:
         logger.error("Intervention loop requested but robots not launched")
         return
+    
+    print("webrtc_intervene_endpoint: ", webrtc_intervene_endpoint)
 
     try:
         # Move to safe starting position with torque enabled
@@ -204,11 +236,36 @@ def _intervention_loop() -> None:
 
         # Main intervention loop: execute queued tasks and lightweight monitoring
         counter = 0
-        while currently_intervening:
+        import urllib.request
+        from urllib.error import URLError, HTTPError
+
+        while (not intervention_stop_event.is_set()) and currently_intervening:
             joint_states = agent.act({})
             counter += 1
-            if counter % 100 == 0:
+            if counter % 1000 == 0:
                 print("currently intervening with joint states: ", joint_states)
+            # Prefer WebRTC DataChannel if available; otherwise fallback to HTTP POST
+            try:
+                if webrtc_dc is not None and getattr(webrtc_dc, "readyState", "") == "open":
+                    payload = {
+                        "joint_states": joint_states.tolist() if hasattr(joint_states, 'tolist') else joint_states,
+                        "timestamp": time.time(),
+                    }
+                    _webrtc_send_json(payload)
+                elif webrtc_intervene_endpoint:
+                    payload = json.dumps({"joint_states": joint_states.tolist() if hasattr(joint_states, 'tolist') else joint_states}).encode("utf-8")
+                    req = urllib.request.Request(
+                        webrtc_intervene_endpoint,
+                        data=payload,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=0.05) as _:
+                        pass
+            except (URLError, HTTPError, Exception):
+                # Swallow transient errors to keep the control loop running
+                pass
+
             time.sleep(0.01)
 
     except Exception as e:
@@ -248,12 +305,118 @@ def stop_intervention() -> None:
     global intervention_thread
     with intervention_lock:
         logger.info("Stopping intervention thread")
+        # Signal loop to stop
+        try:
+            global currently_intervening
+            currently_intervening = False
+        except Exception:
+            pass
         intervention_stop_event.set()
         if intervention_thread is not None and intervention_thread.is_alive():
             logger.debug("Joining intervention thread %s", intervention_thread.name)
-            intervention_thread.join(timeout=1)
+            intervention_thread.join(timeout=2)
+            if intervention_thread.is_alive():
+                logger.warning("Intervention thread did not stop within timeout")
         intervention_thread = None
         logger.info("Intervention thread stopped")
+
+
+def _ensure_webrtc_loop() -> None:
+    """Ensure a dedicated asyncio loop is running for WebRTC operations."""
+    global webrtc_loop, webrtc_loop_thread
+    if webrtc_loop is not None and webrtc_loop_thread is not None and webrtc_loop_thread.is_alive():
+        return
+    webrtc_loop = asyncio.new_event_loop()
+    def _run_loop(loop: asyncio.AbstractEventLoop) -> None:
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
+    webrtc_loop_thread = threading.Thread(target=_run_loop, args=(webrtc_loop,), name="webrtc-loop", daemon=True)
+    webrtc_loop_thread.start()
+
+
+async def _webrtc_negotiate(endpoint: str) -> tuple[RTCPeerConnection, object]:
+    """Create RTCPeerConnection, DataChannel, negotiate with server, and return (pc, dc)."""
+    pc = RTCPeerConnection()
+    dc = pc.createDataChannel("control")
+
+    def _on_state_change() -> None:
+        logger.info("[webrtc] connection state: %s", getattr(pc, "connectionState", None))
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange() -> None:
+        _on_state_change()
+
+    # Register DataChannel events
+    global webrtc_connected
+    @dc.on("open")
+    def _on_open() -> None:
+        webrtc_connected = True
+        logger.info("[webrtc] DataChannel open")
+
+    @dc.on("close")
+    def _on_close() -> None:
+        webrtc_connected = False
+        logger.info("[webrtc] DataChannel closed")
+
+    offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+
+    # Send offer to server and get answer
+    import urllib.request
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=2.0) as resp:
+        answer_bytes = resp.read()
+        answer = json.loads(answer_bytes.decode("utf-8"))
+    await pc.setRemoteDescription(RTCSessionDescription(sdp=answer["sdp"], type=answer["type"]))
+
+    return pc, dc
+
+
+def start_webrtc_connection() -> None:
+    """Start WebRTC negotiation with the configured endpoint (if any)."""
+    global webrtc_pc, webrtc_dc, webrtc_connected
+    if not webrtc_intervene_endpoint:
+        return
+    try:
+        _ensure_webrtc_loop()
+        future = asyncio.run_coroutine_threadsafe(
+            _webrtc_negotiate(webrtc_intervene_endpoint), webrtc_loop
+        )
+        pc, dc = future.result(timeout=5.0)
+        webrtc_pc = pc
+        webrtc_dc = dc
+        webrtc_connected = True
+        logger.info("[webrtc] DataChannel created and negotiation complete")
+    except Exception as e:
+        logger.exception("[webrtc] negotiation failed: %s", e)
+        webrtc_connected = False
+
+
+def stop_webrtc_connection() -> None:
+    """Close WebRTC connection and stop loop if idle."""
+    global webrtc_pc, webrtc_dc, webrtc_connected
+    try:
+        if webrtc_dc is not None:
+            try:
+                webrtc_dc.close()
+            except Exception:
+                pass
+        if webrtc_pc is not None:
+            fut = asyncio.run_coroutine_threadsafe(webrtc_pc.close(), webrtc_loop) if webrtc_loop else None
+            if fut is not None:
+                try:
+                    fut.result(timeout=2.0)
+                except Exception:
+                    pass
+    finally:
+        webrtc_pc = None
+        webrtc_dc = None
+        webrtc_connected = False
 
 
 def enqueue_intervention_task(task_callable, *args, **kwargs) -> None:
@@ -305,11 +468,44 @@ def api_intervene_status():
 
 @app.post("/intervene")
 def api_intervene_start():
+    global webrtc_intervene_endpoint, curr_tracking_robot_webrtc
     if not launched:
         return jsonify({"status": "not_launched", "message": "Robots not launched"}), 400
     
     if is_intervention_active():
         return jsonify({"status": "already_active"}), 200
+
+    # Accept optional streamAddress from UI and build target endpoint
+    try:
+        body = request.get_json(silent=True) or {}
+        stream_address = (body.get("streamAddress") or "").strip()
+    except Exception:
+        stream_address = ""
+
+    print("stream_address: ", stream_address)
+
+    if stream_address:
+        try:
+            from urllib.parse import urlparse, urlunparse
+
+            parsed = urlparse(stream_address if "://" in stream_address else f"http://{stream_address}")
+            base = parsed._replace(path="/client/intervene", params="", query="", fragment="")
+            print("base: ", base)
+            webrtc_intervene_endpoint = urlunparse(base)
+            print("webrtc_intervene_endpoint: ", webrtc_intervene_endpoint)
+            curr_tracking_robot_webrtc = stream_address
+            # Attempt WebRTC negotiation up-front for low-latency channel
+            try:
+                start_webrtc_connection()
+            except Exception:
+                logger.debug("[webrtc] failed to start (continuing with HTTP fallback)", exc_info=True)
+        except Exception:
+            # If invalid, ignore and proceed without endpoint
+            webrtc_intervene_endpoint = None
+            curr_tracking_robot_webrtc = None
+    else:
+        webrtc_intervene_endpoint = None
+        curr_tracking_robot_webrtc = None
 
     intervene()
     # Race: became active between checks
@@ -320,6 +516,11 @@ def api_intervene_start():
 def api_intervene_stop():
     if not is_intervention_active():
         return jsonify({"status": "not_active"}), 400
+    # Close WebRTC channel if open
+    try:
+        stop_webrtc_connection()
+    except Exception:
+        logger.debug("[webrtc] error stopping connection", exc_info=True)
     stop_intervention()
     return jsonify({"status": "stopped", "message": "Intervention mode ended"})
 

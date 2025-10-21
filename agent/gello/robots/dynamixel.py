@@ -104,7 +104,6 @@ class DynamixelRobot(Robot):
         return len(self._joint_ids)
 
     def get_joint_state(self) -> np.ndarray:
-        print("got joint state: ", self._driver.get_joints())
         pos = (self._driver.get_joints() - self._joint_offsets) * self._joint_signs
         assert len(pos) == self.num_dofs()
 
