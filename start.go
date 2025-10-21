@@ -6,15 +6,25 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+    "path/filepath"
 	"sync"
 	"syscall"
 	"time"
 )
 
 func main() {
+    homeDir, err := os.UserHomeDir()
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "failed to determine home directory: %v\n", err)
+        os.Exit(1)
+    }
+    baseDir := filepath.Join(homeDir, "Desktop", "intervention")
+    agentDir := filepath.Join(baseDir, "agent", "experiments")
+    uiDir := filepath.Join(baseDir, "ui")
+
 	// Start Agent (python run_robots.py) in its own process group
-	agentCmd := exec.Command("python", "run_robots.py")
-	agentCmd.Dir = "agent/experiments"
+	agentCmd := exec.Command("python3", "run_robots.py")
+    agentCmd.Dir = agentDir
 	agentCmd.Stdout = os.Stdout
 	agentCmd.Stderr = os.Stderr
 	agentCmd.Stdin = os.Stdin
@@ -29,7 +39,7 @@ func main() {
 
 	// Start UI (yarn run start) in its own process group
 	uiCmd := exec.Command("yarn", "run", "start")
-	uiCmd.Dir = "ui"
+    uiCmd.Dir = uiDir
 	uiCmd.Stdout = os.Stdout
 	uiCmd.Stderr = os.Stderr
 	uiCmd.Stdin = os.Stdin
