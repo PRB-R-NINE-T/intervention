@@ -589,7 +589,7 @@ def api_intervene_start():
             from urllib.parse import urlparse, urlunparse
 
             parsed = urlparse(stream_address if "://" in stream_address else f"http://{stream_address}")
-            base = parsed._replace(path="/offer", params="", query="", fragment="")
+            base = parsed._replace(path="/client/intervene", params="", query="", fragment="")
             print("base: ", base)
             webrtc_intervene_endpoint = urlunparse(base)
             print("webrtc_intervene_endpoint: ", webrtc_intervene_endpoint)
