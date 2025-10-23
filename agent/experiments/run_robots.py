@@ -16,7 +16,15 @@ import tyro
 import zmq.error
 from omegaconf import OmegaConf
 
-from gello.utils.launch_utils import instantiate_from_dict
+# Ensure local source import of gello works if package isn't installed in site-packages
+try:
+    from gello.utils.launch_utils import instantiate_from_dict
+except ModuleNotFoundError:
+    import os, sys
+    agent_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if agent_root not in sys.path:
+        sys.path.insert(0, agent_root)
+    from gello.utils.launch_utils import instantiate_from_dict
 
 logger = logging.getLogger(__name__)
 

@@ -20,10 +20,16 @@ func main() {
     }
     baseDir := filepath.Join(homeDir, "Desktop", "intervention")
     agentDir := filepath.Join(baseDir, "agent", "experiments")
+    // Prefer the venv's Python interpreter if available
+    venvPython := filepath.Join(baseDir, "agent", ".venv", "bin", "python3")
+    pythonBin := "python3"
+    if stat, err := os.Stat(venvPython); err == nil && !stat.IsDir() {
+        pythonBin = venvPython
+    }
     uiDir := filepath.Join(baseDir, "ui")
 
 	// Start Agent (python run_robots.py) in its own process group
-	agentCmd := exec.Command("python3", "run_robots.py")
+    agentCmd := exec.Command(pythonBin, "run_robots.py")
     agentCmd.Dir = agentDir
 	agentCmd.Stdout = os.Stdout
 	agentCmd.Stderr = os.Stderr

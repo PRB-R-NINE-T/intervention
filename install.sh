@@ -43,10 +43,9 @@ LAUNCHER_APP="$HOME/.local/share/applications/$LAUNCHER_NAME"
 LAUNCHER_DESK="$DESKTOP_DIR/$LAUNCHER_NAME"
 LOG_FILE="$DESKTOP_DIR/${APP_NAME}.log"
 
-# Ensure your venv's python path persists for shells you open later
-# (You previously asked to put this in ~/.bashrc.)
-if ! grep -Fq '/home/p/Desktop/intervention/agent/.venv/bin/python3' "$HOME/.bashrc" 2>/dev/null; then
-  echo 'export PATH="/home/p/Desktop/intervention/agent/.venv/bin/python3:$PATH"' >> "$HOME/.bashrc"
+# Ensure your venv's bin directory is on PATH for shells you open later
+if ! grep -Fq '/home/pierre/Desktop/intervention/agent/.venv/bin' "$HOME/.bashrc" 2>/dev/null; then
+  echo 'export PATH="/home/pierre/Desktop/intervention/agent/.venv/bin:$PATH"' >> "$HOME/.bashrc"
 fi
 
 # --- Ensure Yarn is installed and on PATH (user-local) ---
@@ -112,6 +111,7 @@ if [[ -d "$PROJECT_ROOT/agent" ]]; then
   uv pip install -e third_party/DynamixelSDK/python
   uv pip install tyro
   uv pip install -e gello/
+  source .venv/bin/activate
   deactivate || true
   popd >/dev/null
 else
@@ -150,7 +150,7 @@ Name=Intervention
 Comment=Launch Intervention (opens a terminal, logs to $LOG_FILE)
 Terminal=true
 # IMPORTANT: source ~/.bashrc so PATH changes (venv, yarn dir) apply here
-Exec=bash -lc 'export PATH="'"$YARN_DIR"':$PATH"; source "$HOME/.bashrc"; echo -e "\n--- $(date) ---" >> "'"$LOG_FILE"'"; "'"$START_BIN"'" >> "'"$LOG_FILE"'" 2>&1 || { echo "Exited with code $? (see '"$LOG_FILE"')"; read -p "Press Enter to close..."; }'
+Exec=bash -lc 'export PATH="'"$YARN_DIR"':$PATH"; export PATH="/home/pierre/Desktop/intervention/agent/.venv/bin:$PATH"; source "$HOME/.bashrc"; source /home/pierre/Desktop/intervention/agent/.venv/bin/activate; echo -e "\n--- $(date) ---" >> "'"$LOG_FILE"'"; '"$START_BIN"' >> '"$LOG_FILE"' 2>&1 || { echo "Exited with code $? (see '"$LOG_FILE"')"; read -p "Press Enter to close..."; }'
 # Working directory for the app
 Path=$PROJECT_ROOT
 # Optional icon:

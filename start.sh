@@ -2,7 +2,12 @@
 set -e
 
 # Start Agent in its own process group and capture its PID (also PGID)
-( cd agent/experiments && exec setsid python run_robots.py ) &
+# Prefer venv python if present
+PY_BIN="python"
+if [ -x "/home/pierre/Desktop/intervention/agent/.venv/bin/python3" ]; then
+  PY_BIN="/home/pierre/Desktop/intervention/agent/.venv/bin/python3"
+fi
+( cd agent/experiments && exec setsid "$PY_BIN" run_robots.py ) &
 AGENT_PID=$!
 echo "Agent started (pid=$AGENT_PID)"
 
