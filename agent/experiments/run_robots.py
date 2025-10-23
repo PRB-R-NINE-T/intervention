@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 import numpy as np
+import cv2
 
 import tyro
 import zmq.error
@@ -20,7 +21,7 @@ from gello.utils.launch_utils import instantiate_from_dict
 logger = logging.getLogger(__name__)
 
 # Embedded Flask API
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from aiortc import RTCPeerConnection, RTCSessionDescription
 
@@ -38,6 +39,11 @@ webrtc_dc = None
 webrtc_connected = False
 webrtc_loop = None
 webrtc_loop_thread: threading.Thread | None = None
+webrtc_video_task: object | None = None
+
+# Latest JPEG frame for MJPEG streaming
+latest_jpeg_frame: bytes | None = None
+latest_jpeg_lock = threading.Lock()
 
 
 def _webrtc_send_json(payload: dict) -> None:
@@ -46,6 +52,32 @@ def _webrtc_send_json(payload: dict) -> None:
     if webrtc_loop is None or webrtc_dc is None:
         return
     message = json.dumps(payload)
+    def _do_send() -> None:
+        try:
+            if getattr(webrtc_dc, "readyState", "") == "open":
+                webrtc_dc.send(message)
+        except Exception:
+            logger.debug("[webrtc] send failed", exc_info=True)
+    try:
+        webrtc_loop.call_soon_threadsafe(_do_send)
+    except Exception:
+        logger.debug("[webrtc] failed to schedule send", exc_info=True)
+
+
+def _webrtc_send_list(values) -> None:
+    """Send a JSON list over the DataChannel (thread-safe scheduling)."""
+    global webrtc_dc, webrtc_loop
+    if webrtc_loop is None or webrtc_dc is None:
+        return
+    try:
+        # Ensure list-serializable
+        if hasattr(values, "tolist"):
+            values = values.tolist()
+        elif not isinstance(values, (list, tuple)):
+            values = list(values)
+    except Exception:
+        pass
+    message = json.dumps(values)
     def _do_send() -> None:
         try:
             if getattr(webrtc_dc, "readyState", "") == "open":
@@ -247,11 +279,7 @@ def _intervention_loop() -> None:
             # Prefer WebRTC DataChannel if available; otherwise fallback to HTTP POST
             try:
                 if webrtc_dc is not None and getattr(webrtc_dc, "readyState", "") == "open":
-                    payload = {
-                        "joint_states": joint_states.tolist() if hasattr(joint_states, 'tolist') else joint_states,
-                        "timestamp": time.time(),
-                    }
-                    _webrtc_send_json(payload)
+                    _webrtc_send_list(joint_states)
                 elif webrtc_intervene_endpoint:
                     payload = json.dumps({"joint_states": joint_states.tolist() if hasattr(joint_states, 'tolist') else joint_states}).encode("utf-8")
                     req = urllib.request.Request(
@@ -339,6 +367,12 @@ async def _webrtc_negotiate(endpoint: str) -> tuple[RTCPeerConnection, object]:
     pc = RTCPeerConnection()
     dc = pc.createDataChannel("control")
 
+    # Request to receive video from the remote peer
+    try:
+        pc.addTransceiver("video", direction="recvonly")
+    except Exception:
+        logger.debug("[webrtc] addTransceiver(video) failed (continuing)", exc_info=True)
+
     def _on_state_change() -> None:
         logger.info("[webrtc] connection state: %s", getattr(pc, "connectionState", None))
 
@@ -357,6 +391,33 @@ async def _webrtc_negotiate(endpoint: str) -> tuple[RTCPeerConnection, object]:
     def _on_close() -> None:
         webrtc_connected = False
         logger.info("[webrtc] DataChannel closed")
+
+    # Handle incoming media tracks (video)
+    @pc.on("track")
+    def on_track(track) -> None:
+        logger.info("[webrtc] on_track kind=%s", getattr(track, "kind", None))
+        if getattr(track, "kind", None) != "video":
+            return
+
+        async def _consume_video() -> None:
+            global latest_jpeg_frame
+            try:
+                while True:
+                    frame = await track.recv()
+                    img = frame.to_ndarray(format="bgr24")
+                    ok, enc = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    if not ok:
+                        continue
+                    with latest_jpeg_lock:
+                        latest_jpeg_frame = enc.tobytes()
+            except Exception:
+                logger.debug("[webrtc] video consume ended", exc_info=True)
+
+        try:
+            global webrtc_video_task
+            webrtc_video_task = asyncio.create_task(_consume_video())
+        except Exception:
+            logger.debug("[webrtc] failed to start video task", exc_info=True)
 
     offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
@@ -399,8 +460,19 @@ def start_webrtc_connection() -> None:
 
 def stop_webrtc_connection() -> None:
     """Close WebRTC connection and stop loop if idle."""
-    global webrtc_pc, webrtc_dc, webrtc_connected
+    global webrtc_pc, webrtc_dc, webrtc_connected, webrtc_video_task
     try:
+        # Stop video task if any
+        try:
+            if webrtc_video_task is not None and webrtc_loop is not None:
+                def _cancel_video() -> None:
+                    try:
+                        webrtc_video_task.cancel()
+                    except Exception:
+                        pass
+                webrtc_loop.call_soon_threadsafe(_cancel_video)
+        except Exception:
+            pass
         if webrtc_dc is not None:
             try:
                 webrtc_dc.close()
@@ -417,6 +489,7 @@ def stop_webrtc_connection() -> None:
         webrtc_pc = None
         webrtc_dc = None
         webrtc_connected = False
+        webrtc_video_task = None
 
 
 def enqueue_intervention_task(task_callable, *args, **kwargs) -> None:
@@ -459,6 +532,31 @@ CORS(app)
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+def _mjpeg_generator():
+    boundary = b"--frame\r\n"
+    headers = b"Content-Type: image/jpeg\r\n\r\n"
+    while True:
+        with latest_jpeg_lock:
+            frame = latest_jpeg_frame
+        if frame is not None:
+            yield boundary + headers + frame + b"\r\n"
+        time.sleep(0.05)  # ~20 FPS
+
+
+@app.get("/mjpeg")
+def mjpeg_stream():
+    return Response(_mjpeg_generator(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.get("/video")
+def latest_frame():
+    with latest_jpeg_lock:
+        frame = latest_jpeg_frame
+    if frame is None:
+        return ("", 204)
+    return Response(frame, mimetype="image/jpeg")
 
 
 @app.get("/intervene")

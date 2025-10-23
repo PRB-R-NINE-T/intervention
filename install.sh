@@ -8,6 +8,21 @@ sudo apt install -y python3 python3-venv python3-pip
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+export NVM_DIR="$([ -z "${XDG_CONFIG_HOME-}" ] && printf %s "${HOME}/.nvm" || printf %s "${XDG_CONFIG_HOME}/nvm")"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" # This loads nvm
+
+nvm install --lts
+nvm use lts
+corepack enable
+
+corepack prepare yarn@stable --activate
+
+sudo snap install go --classic
+
 # --- Resolve paths ---
 DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"   # ~/Desktop/intervention
@@ -86,6 +101,7 @@ if [[ -d "$PROJECT_ROOT/agent" ]]; then
   uv pip install -r requirements.txt
   uv pip install -e .
   uv pip install -e third_party/DynamixelSDK/python
+  uv pip install tyro
   deactivate || true
   popd >/dev/null
 else
@@ -142,6 +158,8 @@ fi
 
 # --- Validate (non-fatal) ---
 desktop-file-validate "$LAUNCHER_APP" || true
+
+mkdir -p $DESKTOP_DIR/datasets
 
 echo "-------------------------------------------"
 echo "Done."
