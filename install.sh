@@ -111,7 +111,6 @@ if [[ -d "$PROJECT_ROOT/agent" ]]; then
   uv pip install -e .
   uv pip install -e third_party/DynamixelSDK/python
   uv pip install tyro
-  uv pip install -r 
   uv pip install -e gello/
   deactivate || true
   popd >/dev/null
